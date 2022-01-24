@@ -3,6 +3,14 @@ web3.eth API
 
 .. py:module:: web3.eth
 
+.. warning:: Whoa there, Binance Smart Chain user! Web3.py is an Ethereum-specific library,
+  which now defaults to "type 2" transactions as of the London network upgrade. BSC apparently
+  does not support these newer transaction types.
+
+  From issues opened, it seems BSC transactions must include ``gasPrice``, but not ``type``,
+  ``maxFeePerGas``, or ``maxPriorityFeePerGas``. If you have trouble beyond that, please find an
+  appropriate BSC forum to raise your question.
+
 .. py:class:: Eth
 
 The ``web3.eth`` object exposes the following properties and methods to
@@ -41,7 +49,7 @@ The following properties are available on the ``web3.eth`` namespace.
 .. py:attribute:: Eth.default_account
 
     The ethereum address that will be used as the default ``from`` address for
-    all transactions.
+    all transactions. Defaults to empty.
 
 
 .. py:attribute:: Eth.defaultAccount
@@ -53,7 +61,7 @@ The following properties are available on the ``web3.eth`` namespace.
 .. py:attribute:: Eth.default_block
 
     The default block number that will be used for any RPC methods that accept
-    a block identifier.  Defaults to ``'latest'``.
+    a block identifier. Defaults to ``'latest'``.
 
 
 .. py:attribute:: Eth.defaultBlock

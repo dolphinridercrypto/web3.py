@@ -11,7 +11,7 @@ Web3 API
 
 .. py:class:: Web3(provider)
 
-Each ``web3`` instance exposes the following APIs.
+Each ``Web3`` instance exposes the following APIs.
 
 Providers
 ~~~~~~~~~
@@ -385,10 +385,10 @@ Check Encodability
         False
 
 
-RPC APIS
-~~~~~~~~
+RPC API Modules
+~~~~~~~~~~~~~~~
 
-Each ``web3`` instance also exposes these namespaced APIs.
+Each ``Web3`` instance also exposes these namespaced API modules.
 
 
 .. py:attribute:: Web3.eth
@@ -410,3 +410,103 @@ Each ``web3`` instance also exposes these namespaced APIs.
 .. py:attribute:: Web3.parity
 
     See :doc:`./web3.parity`
+
+
+These internal modules inherit from the ``web3.module.Module`` class which give them some configurations internal to the
+web3.py library.
+
+
+External Modules
+~~~~~~~~~~~~~~~~
+
+External modules can be used to introduce custom or third-party APIs to your ``Web3`` instance. Adding external modules
+can occur either at instantiation of the ``Web3`` instance or by making use of the ``attach_modules()`` method.
+
+Unlike the native modules, external modules need not inherit from the ``web3.module.Module`` class. The only requirement
+is that a Module must be a class and, if you'd like to make use of the parent ``Web3`` instance, it must be passed into
+the ``__init__`` function. For example:
+
+.. code-block:: python
+
+    >>> class ExampleModule():
+    ...
+    ...     def __init__(self, w3):
+    ...         self.w3 = w3
+    ...
+    ...     def print_balance_of_shaq(self):
+    ...         print(self.w3.eth.get_balance('shaq.eth'))
+
+
+.. warning:: Given the flexibility of external modules, use caution and only import modules from trusted third parties
+   and open source code you've vetted!
+
+To instantiate the ``Web3`` instance with external modules:
+
+.. code-block:: python
+
+    >>> from web3 import Web3, HTTPProvider
+    >>> from external_module_library import (
+    ...     ModuleClass1,
+    ...     ModuleClass2,
+    ...     ModuleClass3,
+    ...     ModuleClass4,
+    ...     ModuleClass5,
+    ... )
+    >>> w3 = Web3(
+    ...     HTTPProvider(provider_uri),
+    ...     external_modules={
+    ...         'module1': ModuleClass1,
+    ...         'module2': (ModuleClass2, {
+    ...             'submodule1': ModuleClass3,
+    ...             'submodule2': (ModuleClass4, {
+    ...                 'submodule2a': ModuleClass5,  # submodule children may be nested further if necessary
+    ...             })
+    ...         })
+    ...     }
+    ... )
+
+    # `return_zero`, in this case, is an example attribute of the `ModuleClass1` object
+    >>> w3.module1.return_zero
+    0
+    >>> w3.module2.submodule1.return_one
+    1
+    >>> w3.module2.submodule2.submodule2a.return_two
+    2
+
+
+.. py:method:: w3.attach_modules(modules)
+
+    The ``attach_modules()`` method can be used to attach external modules after the ``Web3`` instance has been
+    instantiated.
+
+    Modules are attached via a `dict` with module names as the keys. The values can either be the module classes
+    themselves, if there are no submodules, or two-item tuples with the module class as the 0th index and a similarly
+    built `dict` containing the submodule information as the 1st index. This pattern may be repeated as necessary.
+
+    .. code-block:: python
+
+        >>> from web3 import Web3, HTTPProvider
+        >>> from external_module_library import (
+        ...     ModuleClass1,
+        ...     ModuleClass2,
+        ...     ModuleClass3,
+        ...     ModuleClass4,
+        ...     ModuleClass5,
+        ... )
+        >>> w3 = Web3(HTTPProvider(provider_uri))
+
+        >>> w3.attach_modules({
+        ...     'module1': ModuleClass1,  # the module class itself may be used for a single module with no submodules
+        ...     'module2': (ModuleClass2, {  # a tuple with module class and corresponding submodule dict may be used for modules with submodules
+        ...         'submodule1': ModuleClass3,
+        ...         'submodule2': (ModuleClass4, {  # this pattern may be repeated as necessary
+        ...             'submodule2a': ModuleClass5,
+        ...         })
+        ...     })
+        ... })
+        >>> w3.module1.return_zero
+        0
+        >>> w3.module2.submodule1.return_one
+        1
+        >>> w3.module2.submodule2.submodule2a.return_two
+        2

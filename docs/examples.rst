@@ -263,7 +263,7 @@ Transaction receipts can be retrieved using the ``web3.eth.get_transaction_recei
     }
 
 
-If the transaction has not yet been mined then this method will return ``None``.
+If the transaction has not yet been mined then this method will raise a ``TransactionNotFound`` error.
 
 
 Working with Contracts
@@ -1010,7 +1010,7 @@ The script can be run with: ``python ./eventscanner.py <your JSON-RPC API URL>``
 
             * Do not overload node serving JSON-RPC API by asking data for too many events at a time
 
-            Currently Ethereum JSON-API does not have an API to tell when a first event occured in a blockchain
+            Currently Ethereum JSON-API does not have an API to tell when a first event occurred in a blockchain
             and our heuristics try to accelerate block fetching (chunk size) until we see the first event.
 
             These heurestics exponentially increase the scan chunk size depending on if we are seeing events or not.
