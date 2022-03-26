@@ -49,6 +49,10 @@ from web3._utils.empty import (
 from web3._utils.encoding import (
     to_hex,
 )
+from web3._utils.fee_utils import (
+    async_fee_history_priority_fee,
+    fee_history_priority_fee,
+)
 from web3._utils.filters import (
     select_filter_method,
 )
@@ -110,11 +114,12 @@ from web3.types import (
 class BaseEth(Module):
     _default_account: Union[ChecksumAddress, Empty] = empty
     _default_block: BlockIdentifier = "latest"
+    _default_chain_id: Optional[int] = None
     gasPriceStrategy = None
 
     _gas_price: Method[Callable[[], Wei]] = Method(
         RPC.eth_gasPrice,
-        mungers=None,
+        is_property=True,
     )
 
     @property
@@ -206,7 +211,7 @@ class BaseEth(Module):
 
     def _generate_gas_price(self, transaction_params: Optional[TxParams] = None) -> Optional[Wei]:
         if self.gasPriceStrategy:
-            return self.gasPriceStrategy(self.web3, transaction_params)
+            return self.gasPriceStrategy(self.w3, transaction_params)
         return None
 
     def set_gas_price_strategy(self, gas_price_strategy: GasPriceStrategy) -> None:
@@ -227,7 +232,7 @@ class BaseEth(Module):
 
         return params
 
-    _estimate_gas: Method[Callable[..., Wei]] = Method(
+    _estimate_gas: Method[Callable[..., int]] = Method(
         RPC.eth_estimateGas,
         mungers=[estimate_gas_munger]
     )
@@ -239,7 +244,7 @@ class BaseEth(Module):
 
     _max_priority_fee: Method[Callable[..., Wei]] = Method(
         RPC.eth_maxPriorityFeePerGas,
-        mungers=None,
+        is_property=True,
     )
 
     def get_block_munger(
@@ -262,12 +267,12 @@ class BaseEth(Module):
 
     get_block_number: Method[Callable[[], BlockNumber]] = Method(
         RPC.eth_blockNumber,
-        mungers=None,
+        is_property=True,
     )
 
     get_coinbase: Method[Callable[[], ChecksumAddress]] = Method(
         RPC.eth_coinbase,
-        mungers=None,
+        is_property=True,
     )
 
     def block_id_munger(
@@ -278,6 +283,16 @@ class BaseEth(Module):
         if block_identifier is None:
             block_identifier = self.default_block
         return (account, block_identifier)
+
+    def get_storage_at_munger(
+        self,
+        account: Union[Address, ChecksumAddress, ENS],
+        position: int,
+        block_identifier: Optional[BlockIdentifier] = None
+    ) -> Tuple[Union[Address, ChecksumAddress, ENS], int, BlockIdentifier]:
+        if block_identifier is None:
+            block_identifier = self.default_block
+        return (account, position, block_identifier)
 
     def call_munger(
         self,
@@ -300,22 +315,27 @@ class BaseEth(Module):
 
     _get_accounts: Method[Callable[[], Tuple[ChecksumAddress]]] = Method(
         RPC.eth_accounts,
-        mungers=None,
+        is_property=True,
     )
 
     _get_hashrate: Method[Callable[[], int]] = Method(
         RPC.eth_hashrate,
-        mungers=None,
+        is_property=True,
     )
 
     _chain_id: Method[Callable[[], int]] = Method(
         RPC.eth_chainId,
-        mungers=None,
+        is_property=True,
     )
 
     _is_mining: Method[Callable[[], bool]] = Method(
         RPC.eth_mining,
-        mungers=None,
+        is_property=True,
+    )
+
+    _is_syncing: Method[Callable[[], Union[SyncStatus, bool]]] = Method(
+        RPC.eth_syncing,
+        is_property=True,
     )
 
     _get_transaction_receipt: Method[Callable[[_Hash32], TxReceipt]] = Method(
@@ -338,7 +358,14 @@ class AsyncEth(BaseEth):
 
     @property
     async def chain_id(self) -> int:
-        return await self._chain_id()  # type: ignore
+        if self._default_chain_id is None:
+            return await self._chain_id()  # type: ignore
+        else:
+            return self._default_chain_id
+
+    @chain_id.setter
+    def chain_id(self, value: int) -> None:
+        self._default_chain_id = value
 
     @property
     async def coinbase(self) -> ChecksumAddress:
@@ -356,11 +383,26 @@ class AsyncEth(BaseEth):
 
     @property
     async def max_priority_fee(self) -> Wei:
-        return await self._max_priority_fee()  # type: ignore
+        """
+        Try to use eth_maxPriorityFeePerGas but, since this is not part of the spec and is only
+        supported by some clients, fall back to an eth_feeHistory calculation with min and max caps.
+        """
+        try:
+            return await self._max_priority_fee()  # type: ignore
+        except ValueError:
+            warnings.warn(
+                "There was an issue with the method eth_maxPriorityFeePerGas. Calculating using "
+                "eth_feeHistory."
+            )
+            return await async_fee_history_priority_fee(self)
 
     @property
     async def mining(self) -> bool:
         return await self._is_mining()  # type: ignore
+
+    @property
+    async def syncing(self) -> Union[SyncStatus, bool]:
+        return await self._is_syncing()  # type: ignore
 
     async def fee_history(
             self,
@@ -402,7 +444,7 @@ class AsyncEth(BaseEth):
         self,
         transaction: TxParams,
         block_identifier: Optional[BlockIdentifier] = None
-    ) -> Wei:
+    ) -> int:
         # types ignored b/c mypy conflict with BlockingEth properties
         return await self._estimate_gas(transaction, block_identifier)  # type: ignore
 
@@ -435,6 +477,17 @@ class AsyncEth(BaseEth):
         block_identifier: Optional[BlockIdentifier] = None
     ) -> HexBytes:
         return await self._get_code(account, block_identifier)
+
+    _get_logs: Method[Callable[[FilterParams], Awaitable[List[LogReceipt]]]] = Method(
+        RPC.eth_getLogs,
+        mungers=[default_root_munger]
+    )
+
+    async def get_logs(
+        self,
+        filter_params: FilterParams,
+    ) -> List[LogReceipt]:
+        return await self._get_logs(filter_params)
 
     _get_transaction_count: Method[Callable[..., Awaitable[Nonce]]] = Method(
         RPC.eth_getTransactionCount,
@@ -484,6 +537,19 @@ class AsyncEth(BaseEth):
                 f"after {timeout} seconds"
             )
 
+    _get_storage_at: Method[Callable[..., Awaitable[HexBytes]]] = Method(
+        RPC.eth_getStorageAt,
+        mungers=[BaseEth.get_storage_at_munger],
+    )
+
+    async def get_storage_at(
+        self,
+        account: Union[Address, ChecksumAddress, ENS],
+        position: int,
+        block_identifier: Optional[BlockIdentifier] = None
+    ) -> HexBytes:
+        return await self._get_storage_at(account, position, block_identifier)
+
     async def call(
         self,
         transaction: TxParams,
@@ -506,7 +572,7 @@ class Eth(BaseEth):
 
     _protocol_version: Method[Callable[[], str]] = Method(
         RPC.eth_protocolVersion,
-        mungers=None,
+        is_property=True,
     )
 
     @property
@@ -525,14 +591,9 @@ class Eth(BaseEth):
         )
         return self.protocol_version
 
-    is_syncing: Method[Callable[[], Union[SyncStatus, bool]]] = Method(
-        RPC.eth_syncing,
-        mungers=None,
-    )
-
     @property
     def syncing(self) -> Union[SyncStatus, bool]:
-        return self.is_syncing()
+        return self._is_syncing()
 
     @property
     def coinbase(self) -> ChecksumAddress:
@@ -576,7 +637,14 @@ class Eth(BaseEth):
 
     @property
     def chain_id(self) -> int:
-        return self._chain_id()
+        if self._default_chain_id is None:
+            return self._chain_id()
+        else:
+            return self._default_chain_id
+
+    @chain_id.setter
+    def chain_id(self, value: int) -> None:
+        self._default_chain_id = value
 
     @property
     def chainId(self) -> int:
@@ -593,21 +661,22 @@ class Eth(BaseEth):
 
     @property
     def max_priority_fee(self) -> Wei:
-        return self._max_priority_fee()
-
-    def get_storage_at_munger(
-        self,
-        account: Union[Address, ChecksumAddress, ENS],
-        position: int,
-        block_identifier: Optional[BlockIdentifier] = None
-    ) -> Tuple[Union[Address, ChecksumAddress, ENS], int, BlockIdentifier]:
-        if block_identifier is None:
-            block_identifier = self.default_block
-        return (account, position, block_identifier)
+        """
+        Try to use eth_maxPriorityFeePerGas but, since this is not part of the spec and is only
+        supported by some clients, fall back to an eth_feeHistory calculation with min and max caps.
+        """
+        try:
+            return self._max_priority_fee()
+        except ValueError:
+            warnings.warn(
+                "There was an issue with the method eth_maxPriorityFeePerGas. Calculating using "
+                "eth_feeHistory."
+            )
+            return fee_history_priority_fee(self)
 
     get_storage_at: Method[Callable[..., HexBytes]] = Method(
         RPC.eth_getStorageAt,
-        mungers=[get_storage_at_munger],
+        mungers=[BaseEth.get_storage_at_munger],
     )
 
     def get_proof_munger(
@@ -750,8 +819,8 @@ class Eth(BaseEth):
         return self.replace_transaction(transaction_hash, new_transaction)
 
     def replace_transaction(self, transaction_hash: _Hash32, new_transaction: TxParams) -> HexBytes:
-        current_transaction = get_required_transaction(self.web3, transaction_hash)
-        return replace_transaction(self.web3, current_transaction, new_transaction)
+        current_transaction = get_required_transaction(self.w3, transaction_hash)
+        return replace_transaction(self.w3, current_transaction, new_transaction)
 
     # todo: Update Any to stricter kwarg checking with TxParams
     # https://github.com/python/mypy/issues/4441
@@ -765,10 +834,10 @@ class Eth(BaseEth):
         self, transaction_hash: _Hash32, **transaction_params: Any
     ) -> HexBytes:
         assert_valid_transaction_params(cast(TxParams, transaction_params))
-        current_transaction = get_required_transaction(self.web3, transaction_hash)
+        current_transaction = get_required_transaction(self.w3, transaction_hash)
         current_transaction_params = extract_valid_transaction_params(current_transaction)
         new_transaction = merge(current_transaction_params, transaction_params)
-        return replace_transaction(self.web3, current_transaction, new_transaction)
+        return replace_transaction(self.w3, current_transaction, new_transaction)
 
     def send_transaction(self, transaction: TxParams) -> HexBytes:
         return self._send_transaction(transaction)
@@ -810,7 +879,7 @@ class Eth(BaseEth):
         self,
         transaction: TxParams,
         block_identifier: Optional[BlockIdentifier] = None
-    ) -> Wei:
+    ) -> int:
         return self._estimate_gas(transaction, block_identifier)
 
     def fee_history(
@@ -898,7 +967,7 @@ class Eth(BaseEth):
     ) -> Union[Type[Contract], Contract]:
         ContractFactoryClass = kwargs.pop('ContractFactoryClass', self.defaultContractFactory)
 
-        ContractFactory = ContractFactoryClass.factory(self.web3, **kwargs)
+        ContractFactory = ContractFactoryClass.factory(self.w3, **kwargs)
 
         if address:
             return ContractFactory(address)
@@ -921,7 +990,7 @@ class Eth(BaseEth):
 
     get_work: Method[Callable[[], List[HexBytes]]] = Method(
         RPC.eth_getWork,
-        mungers=None,
+        is_property=True,
     )
 
     @deprecated_for("generate_gas_price")

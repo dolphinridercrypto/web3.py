@@ -34,7 +34,7 @@ def bytes32(val):
     if isinstance(val, int):
         result = Web3.toBytes(val)
     else:
-        raise TypeError('val %r could not be converted to bytes')
+        raise TypeError(f'{val!r} could not be converted to bytes')
     if len(result) < 32:
         return result.rjust(32, b'\0')
     else:
@@ -220,7 +220,7 @@ def ens_setup():
 @pytest.fixture
 def ens(ens_setup, mocker):
     mocker.patch('web3.middleware.stalecheck._isfresh', return_value=True)
-    ens_setup.web3.eth.default_account = ens_setup.web3.eth.coinbase
+    ens_setup.w3.eth.default_account = ens_setup.w3.eth.coinbase
     return ens_setup
 
 

@@ -2,7 +2,6 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Callable,
-    Coroutine,
 )
 
 from eth_utils.toolz import (
@@ -16,6 +15,7 @@ from web3._utils.transactions import (
     get_buffered_gas_estimate,
 )
 from web3.types import (
+    AsyncMiddleware,
     RPCEndpoint,
     RPCResponse,
 )
@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 
 
 def buffered_gas_estimate_middleware(
-    make_request: Callable[[RPCEndpoint, Any], Any], web3: "Web3"
+    make_request: Callable[[RPCEndpoint, Any], Any], w3: "Web3"
 ) -> Callable[[RPCEndpoint, Any], RPCResponse]:
     def middleware(method: RPCEndpoint, params: Any) -> RPCResponse:
         if method == 'eth_sendTransaction':
@@ -34,7 +34,7 @@ def buffered_gas_estimate_middleware(
                 transaction = assoc(
                     transaction,
                     'gas',
-                    hex(get_buffered_gas_estimate(web3, transaction)),
+                    hex(get_buffered_gas_estimate(w3, transaction)),
                 )
                 return make_request(method, [transaction])
         return make_request(method, params)
@@ -42,13 +42,13 @@ def buffered_gas_estimate_middleware(
 
 
 async def async_buffered_gas_estimate_middleware(
-    make_request: Callable[[RPCEndpoint, Any], Any], web3: "Web3"
-) -> Callable[[RPCEndpoint, Any], Coroutine[Any, Any, RPCResponse]]:
+    make_request: Callable[[RPCEndpoint, Any], Any], w3: "Web3"
+) -> AsyncMiddleware:
     async def middleware(method: RPCEndpoint, params: Any) -> RPCResponse:
         if method == 'eth_sendTransaction':
             transaction = params[0]
             if 'gas' not in transaction:
-                gas_estimate = await async_get_buffered_gas_estimate(web3, transaction)
+                gas_estimate = await async_get_buffered_gas_estimate(w3, transaction)
                 transaction = assoc(
                     transaction,
                     'gas',

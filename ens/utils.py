@@ -1,16 +1,12 @@
-import copy
 import datetime
-import functools
 from typing import (
     TYPE_CHECKING,
     Any,
-    Callable,
     Collection,
     Optional,
     Sequence,
     Tuple,
     Type,
-    TypeVar,
     Union,
     cast,
 )
@@ -59,18 +55,6 @@ if TYPE_CHECKING:
 def Web3() -> Type['_Web3']:
     from web3 import Web3 as Web3Main
     return Web3Main
-
-
-TFunc = TypeVar("TFunc", bound=Callable[..., Any])
-
-
-def dict_copy(func: TFunc) -> TFunc:
-    "copy dict keyword args, to avoid modifying caller's copy"
-    @functools.wraps(func)
-    def wrapper(*args: Any, **kwargs: Any) -> TFunc:
-        copied_kwargs = copy.deepcopy(kwargs)
-        return func(*args, **copied_kwargs)
-    return cast(TFunc, wrapper)
 
 
 def init_web3(
@@ -156,7 +140,7 @@ def sha3_text(val: Union[str, bytes]) -> HexBytes:
 def label_to_hash(label: str) -> HexBytes:
     label = normalize_name(label)
     if '.' in label:
-        raise ValueError("Cannot generate hash for label %r with a '.'" % label)
+        raise ValueError(f"Cannot generate hash for label {label!r} with a '.'")
     return Web3().keccak(text=label)
 
 
